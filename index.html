@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>Centro de Arequipa - Antes y ahora</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%; width: 100%;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  #map {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+  }
+  /* Loading / status */
+  #status {
+    position: absolute;
+    top: env(safe-area-inset-top, 0px);
+    left: 0; right: 0;
+    padding: 10px 14px;
+    background: rgba(0,0,0,0.75);
+    color: #fff;
+    font-size: 13px;
+    text-align: center;
+    z-index: 1000;
+    display: none;
+  }
+  #status.show { display: block; }
+  #status.error { background: rgba(180,30,30,0.9); }
+
+  /* Locate button */
+  #locateBtn {
+    position: absolute;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    right: 16px;
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: #fff;
+    border: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    z-index: 900;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    color: #1a73e8;
+    transition: transform 0.1s;
+  }
+  #locateBtn:active { transform: scale(0.92); }
+  #locateBtn.tracking { color: #fff; background: #1a73e8; }
+  #locateBtn svg { width: 24px; height: 24px; }
+
+  /* Custom pin */
+  .pin-marker {
+    width: 32px; height: 32px;
+    background: #e53935;
+    border: 3px solid #fff;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pin-marker span {
+    transform: rotate(45deg);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  /* User location pulse */
+  .user-loc {
+    width: 18px; height: 18px;
+    background: #1a73e8;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(26,115,232,0.6);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(26,115,232,0.6); }
+    70% { box-shadow: 0 0 0 20px rgba(26,115,232,0); }
+    100% { box-shadow: 0 0 0 0 rgba(26,115,232,0); }
+  }
+
+  /* Photo viewer modal */
+  #viewer {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 2000;
+    display: none;
+    flex-direction: column;
+  }
+  #viewer.open { display: flex; }
+  #viewerHeader {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 14px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #fff;
+  }
+  #backBtn {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: none;
+    color: #fff;
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  #backBtn:active { background: rgba(255,255,255,0.3); }
+  #viewerInfo {
+    font-size: 14px;
+    line-height: 1.3;
+    flex: 1;
+    min-width: 0;
+  }
+  #viewerInfo .year {
+    font-weight: 600;
+    font-size: 16px;
+  }
+  #viewerInfo .count {
+    opacity: 0.7;
+    font-size: 12px;
+  }
+  #photoStrip {
+    flex: 1;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  #photoStrip::-webkit-scrollbar { display: none; }
+  .photo-slide {
+    flex: 0 0 100%;
+    width: 100%;
+    height: 100%;
+    scroll-snap-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .photo-slide img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  .photo-slide .photo-error {
+    color: #aaa;
+    text-align: center;
+    padding: 20px;
+    font-size: 13px;
+  }
+  #photoIndicator {
+    position: absolute;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    z-index: 10;
+  }
+  .ind-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.4);
+    transition: background 0.2s, transform 0.2s;
+  }
+  .ind-dot.active {
+    background: #fff;
+    transform: scale(1.3);
+  }
+
+  /* Hide leaflet attribution slightly */
+  .leaflet-control-attribution {
+    font-size: 10px !important;
+    background: rgba(255,255,255,0.7) !important;
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="status"></div>
+
+<button id="locateBtn" aria-label="Mi ubicación">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+  </svg>
+</button>
+
+<div id="viewer" role="dialog" aria-modal="true">
+  <div id="viewerHeader">
+    <button id="backBtn" aria-label="Regresar">←</button>
+    <div id="viewerInfo">
+      <div class="year"></div>
+      <div class="count"></div>
+    </div>
+  </div>
+  <div id="photoStrip"></div>
+  <div id="photoIndicator"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  // ---------- Config ----------
+  const EXCEL_FILE = 'Informacion_centro.xlsx';
+  const PHOTO_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.webp', '.JPEG', '.JPG', '.PNG'];
+  const AREQUIPA_CENTER = [-16.3989, -71.5350];
+  const DEFAULT_ZOOM = 15;
+
+  // ---------- Status helper ----------
+  const statusEl = document.getElementById('status');
+  let statusTimer;
+  function showStatus(msg, isError, duration) {
+    clearTimeout(statusTimer);
+    statusEl.textContent = msg;
+    statusEl.className = 'show' + (isError ? ' error' : '');
+    if (duration) {
+      statusTimer = setTimeout(() => { statusEl.className = ''; }, duration);
+    }
+  }
+  function hideStatus() {
+    clearTimeout(statusTimer);
+    statusEl.className = '';
+  }
+
+  // ---------- Map ----------
+  const map = L.map('map', {
+    zoomControl: false,
+    attributionControl: true,
+  }).setView(AREQUIPA_CENTER, DEFAULT_ZOOM);
+
+  L.control.zoom({ position: 'topright' }).addTo(map);
+
+  // Esri World Imagery (satellite, no API key required)
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 20,
+    attribution: 'Tiles &copy; Esri'
+  }).addTo(map);
+
+  // Optional: street labels overlay so you can see street names on satellite
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 20,
+    opacity: 0.9
+  }).addTo(map);
+
+  // ---------- User location ----------
+  let userMarker = null;
+  let watchId = null;
+  let tracking = false;
+  const locateBtn = document.getElementById('locateBtn');
+
+  function setUserLocation(latlng, accuracy) {
+    if (!userMarker) {
+      userMarker = L.marker(latlng, {
+        icon: L.divIcon({
+          className: '',
+          html: '<div class="user-loc"></div>',
+          iconSize: [18,18],
+          iconAnchor: [9,9]
+        }),
+        interactive: false,
+        keyboard: false
+      }).addTo(map);
+    } else {
+      userMarker.setLatLng(latlng);
+    }
+  }
+
+  locateBtn.addEventListener('click', () => {
+    if (!navigator.geolocation) {
+      showStatus('Geolocalización no disponible en este navegador', true, 3000);
+      return;
+    }
+    if (tracking) {
+      // Center on current user location
+      if (userMarker) {
+        map.flyTo(userMarker.getLatLng(), Math.max(map.getZoom(), 17));
+      }
+      return;
+    }
+    showStatus('Obteniendo tu ubicación...', false);
+    locateBtn.classList.add('tracking');
+    tracking = true;
+
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const ll = [pos.coords.latitude, pos.coords.longitude];
+        const wasFirst = !userMarker;
+        setUserLocation(ll, pos.coords.accuracy);
+        if (wasFirst) {
+          map.flyTo(ll, 18);
+          hideStatus();
+        }
+      },
+      (err) => {
+        let msg = 'No se pudo obtener tu ubicación';
+        if (err.code === 1) msg = 'Permiso de ubicación denegado';
+        else if (err.code === 3) msg = 'Tiempo de espera agotado al obtener ubicación';
+        showStatus(msg, true, 4000);
+        locateBtn.classList.remove('tracking');
+        tracking = false;
+        if (watchId !== null) {
+          navigator.geolocation.clearWatch(watchId);
+          watchId = null;
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    );
+  });
+
+  // ---------- Excel loading & parsing ----------
+  function parseCoord(raw) {
+    if (raw == null) return null;
+    const s = String(raw).trim();
+    // Accept "lat, lon" or "lat lon" or "lat;lon"
+    const parts = s.split(/[,;\s]+/).filter(Boolean);
+    if (parts.length < 2) return null;
+    const lat = parseFloat(parts[0]);
+    const lon = parseFloat(parts[1]);
+    if (isNaN(lat) || isNaN(lon)) return null;
+    return [lat, lon];
+  }
+
+  function normalizeHeader(h) {
+    return String(h || '').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]/g, '');
+  }
+
+  function parseSheet(rows) {
+    // Find header row: must contain a cell starting with "nombre"
+    let headerRowIdx = -1;
+    let headerMap = {};
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const norm = row.map(normalizeHeader);
+      const nombreCol = norm.findIndex(c => c.startsWith('nombre'));
+      if (nombreCol >= 0) {
+        headerRowIdx = i;
+        headerMap.nombre = nombreCol;
+        headerMap.coordenada = norm.findIndex(c => c.startsWith('coord'));
+        headerMap.ano = norm.findIndex(c => c === 'ano' || c === 'anio' || c === 'year' || c.startsWith('a'));
+        // For 'ano': try harder — we want the column that's basically "año"
+        if (headerMap.ano < 0 || headerMap.ano === nombreCol) {
+          headerMap.ano = norm.findIndex(c => c === 'ano' || c === 'anio' || c === 'year');
+        }
+        headerMap.descripcion = norm.findIndex(c => c.startsWith('desc'));
+        headerMap.orden = norm.findIndex(c => c.startsWith('orden'));
+        break;
+      }
+    }
+    if (headerRowIdx < 0) {
+      throw new Error('No encontré la fila de encabezados. Asegúrate de tener una columna "Nombre de foto".');
+    }
+
+    const records = [];
+    for (let i = headerRowIdx + 1; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const nombre = row[headerMap.nombre];
+      const coordRaw = row[headerMap.coordenada];
+      if (nombre == null || String(nombre).trim() === '') continue;
+      const coord = parseCoord(coordRaw);
+      if (!coord) continue;
+      const ano = headerMap.ano >= 0 ? row[headerMap.ano] : null;
+      const desc = headerMap.descripcion >= 0 ? row[headerMap.descripcion] : null;
+      const orden = headerMap.orden >= 0 ? row[headerMap.orden] : null;
+      records.push({
+        nombre: String(nombre).trim(),
+        lat: coord[0],
+        lon: coord[1],
+        ano: ano != null ? String(ano).trim() : '',
+        descripcion: desc != null ? String(desc).trim() : '',
+        orden: orden != null && !isNaN(parseInt(orden)) ? parseInt(orden) : 0
+      });
+    }
+    return records;
+  }
+
+  function groupByCoord(records) {
+    const groups = new Map();
+    for (const r of records) {
+      // Round to 6 decimals for grouping (≈11cm precision)
+      const key = r.lat.toFixed(6) + ',' + r.lon.toFixed(6);
+      if (!groups.has(key)) {
+        groups.set(key, { lat: r.lat, lon: r.lon, photos: [] });
+      }
+      groups.get(key).photos.push(r);
+    }
+    // Sort photos within each group: by orden, then by año, then by nombre
+    for (const g of groups.values()) {
+      g.photos.sort((a, b) => {
+        if (a.orden !== b.orden) return a.orden - b.orden;
+        if (a.ano !== b.ano) return String(a.ano).localeCompare(String(b.ano));
+        return a.nombre.localeCompare(b.nombre);
+      });
+    }
+    return Array.from(groups.values());
+  }
+
+  // ---------- Photo file resolution ----------
+  // Try several variations to find the actual file:
+  // "Foto 1" → ["Foto 1.jpeg", "Foto1.jpeg", "Foto 1.jpg", "Foto1.jpg", ...]
+  function candidateUrls(name) {
+    const trimmed = name.trim();
+    const noSpace = trimmed.replace(/\s+/g, '');
+    const hasExt = /\.(jpe?g|png|webp|gif|bmp)$/i.test(trimmed);
+    const candidates = [];
+    if (hasExt) {
+      candidates.push(trimmed);
+      if (noSpace !== trimmed) candidates.push(noSpace);
+    } else {
+      for (const ext of PHOTO_EXTENSIONS) {
+        candidates.push(trimmed + ext);
+        if (noSpace !== trimmed) candidates.push(noSpace + ext);
+      }
+    }
+    return candidates.map(encodeURI);
+  }
+
+  // Cache: name -> resolved URL (or null if not found)
+  const photoUrlCache = new Map();
+  function resolvePhotoUrl(name) {
+    if (photoUrlCache.has(name)) return Promise.resolve(photoUrlCache.get(name));
+    const candidates = candidateUrls(name);
+    return new Promise((resolve) => {
+      let idx = 0;
+      function tryNext() {
+        if (idx >= candidates.length) {
+          photoUrlCache.set(name, null);
+          return resolve(null);
+        }
+        const url = candidates[idx++];
+        const img = new Image();
+        img.onload = () => { photoUrlCache.set(name, url); resolve(url); };
+        img.onerror = tryNext;
+        img.src = url;
+      }
+      tryNext();
+    });
+  }
+
+  // ---------- Pin / popup ----------
+  function makePin(count) {
+    return L.divIcon({
+      className: '',
+      html: '<div class="pin-marker"><span>' + (count > 1 ? count : '') + '</span></div>',
+      iconSize: [32, 32],
+      iconAnchor: [16, 32]
+    });
+  }
+
+  function addPins(groups) {
+    const allLatLngs = [];
+    for (const g of groups) {
+      const marker = L.marker([g.lat, g.lon], {
+        icon: makePin(g.photos.length)
+      }).addTo(map);
+      marker.on('click', () => openViewer(g));
+      allLatLngs.push([g.lat, g.lon]);
+    }
+    if (allLatLngs.length === 1) {
+      map.setView(allLatLngs[0], 17);
+    } else if (allLatLngs.length > 1) {
+      map.fitBounds(allLatLngs, { padding: [60, 60], maxZoom: 17 });
+    }
+  }
+
+  // ---------- Viewer ----------
+  const viewer = document.getElementById('viewer');
+  const photoStrip = document.getElementById('photoStrip');
+  const photoIndicator = document.getElementById('photoIndicator');
+  const viewerYear = viewer.querySelector('.year');
+  const viewerCount = viewer.querySelector('.count');
+  const backBtn = document.getElementById('backBtn');
+
+  let currentGroup = null;
+
+  function openViewer(group) {
+    currentGroup = group;
+    photoStrip.innerHTML = '';
+    photoIndicator.innerHTML = '';
+
+    group.photos.forEach((p, i) => {
+      const slide = document.createElement('div');
+      slide.className = 'photo-slide';
+      slide.dataset.idx = i;
+
+      const placeholder = document.createElement('div');
+      placeholder.className = 'photo-error';
+      placeholder.textContent = 'Cargando ' + p.nombre + '...';
+      slide.appendChild(placeholder);
+
+      resolvePhotoUrl(p.nombre).then(url => {
+        if (!url) {
+          placeholder.textContent = 'No encontré el archivo "' + p.nombre + '". Revisa el nombre en el Excel y que el archivo esté en la carpeta.';
+          return;
+        }
+        const img = new Image();
+        img.alt = p.nombre + ' (' + (p.ano || 'sin año') + ')';
+        img.src = url;
+        img.onload = () => {
+          slide.innerHTML = '';
+          slide.appendChild(img);
+        };
+        img.onerror = () => {
+          placeholder.textContent = 'Error al cargar ' + p.nombre;
+        };
+      });
+
+      photoStrip.appendChild(slide);
+
+      const dot = document.createElement('div');
+      dot.className = 'ind-dot' + (i === 0 ? ' active' : '');
+      photoIndicator.appendChild(dot);
+    });
+
+    if (group.photos.length <= 1) {
+      photoIndicator.style.display = 'none';
+    } else {
+      photoIndicator.style.display = 'flex';
+    }
+
+    updateViewerHeader(0);
+    viewer.classList.add('open');
+    photoStrip.scrollLeft = 0;
+    history.pushState({ viewer: true }, '');
+  }
+
+  function closeViewer() {
+    if (!viewer.classList.contains('open')) return;
+    viewer.classList.remove('open');
+    currentGroup = null;
+    if (history.state && history.state.viewer) {
+      history.back();
+    }
+  }
+
+  function updateViewerHeader(idx) {
+    if (!currentGroup) return;
+    const p = currentGroup.photos[idx];
+    if (!p) return;
+    const yearStr = p.ano ? p.ano : 'Foto histórica';
+    viewerYear.textContent = p.descripcion ? (yearStr + ' — ' + p.descripcion) : yearStr;
+    viewerCount.textContent = currentGroup.photos.length > 1
+      ? ((idx + 1) + ' de ' + currentGroup.photos.length)
+      : '';
+  }
+
+  // Track current slide via scroll
+  let scrollRaf = null;
+  photoStrip.addEventListener('scroll', () => {
+    if (scrollRaf) return;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = null;
+      const w = photoStrip.clientWidth;
+      if (!w) return;
+      const idx = Math.round(photoStrip.scrollLeft / w);
+      // Update dots
+      const dots = photoIndicator.querySelectorAll('.ind-dot');
+      dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+      updateViewerHeader(idx);
+    });
+  });
+
+  backBtn.addEventListener('click', closeViewer);
+  window.addEventListener('popstate', () => {
+    if (viewer.classList.contains('open')) {
+      viewer.classList.remove('open');
+      currentGroup = null;
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeViewer();
+  });
+
+  // ---------- Boot ----------
+  async function loadExcel() {
+    showStatus('Cargando datos...', false);
+    try {
+      const resp = await fetch(EXCEL_FILE + '?t=' + Date.now());
+      if (!resp.ok) throw new Error('No pude abrir ' + EXCEL_FILE + ' (' + resp.status + ')');
+      const buf = await resp.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+      const records = parseSheet(rows);
+      if (records.length === 0) {
+        showStatus('El Excel no tiene filas válidas todavía.', true, 5000);
+        return;
+      }
+      const groups = groupByCoord(records);
+      addPins(groups);
+      hideStatus();
+    } catch (err) {
+      console.error(err);
+      showStatus('Error: ' + err.message, true);
+    }
+  }
+
+  loadExcel();
+})();
+</script>
+</body>
+</html>
